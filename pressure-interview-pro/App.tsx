@@ -9,7 +9,7 @@ const App: React.FC = () => {
   const [status, setStatus] = useState<InterviewStatus>(InterviewStatus.IDLE);
   const [messages, setMessages] = useState<Message[]>([]);
   const [error, setError] = useState<string | null>(null);
-  
+
   const inputAudioContextRef = useRef<AudioContext | null>(null);
   const outputAudioContextRef = useRef<AudioContext | null>(null);
   const nextStartTimeRef = useRef<number>(0);
@@ -27,7 +27,7 @@ const App: React.FC = () => {
 
   const stopSession = useCallback(() => {
     setStatus(InterviewStatus.DISCONNECTED);
-    
+
     // Stop microphone stream
     if (micStreamRef.current) {
       micStreamRef.current.getTracks().forEach(track => track.stop());
@@ -42,7 +42,7 @@ const App: React.FC = () => {
 
     // Stop audio sources
     sourcesRef.current.forEach(source => {
-      try { source.stop(); } catch (e) {}
+      try { source.stop(); } catch (e) { }
     });
     sourcesRef.current.clear();
 
@@ -101,7 +101,7 @@ const App: React.FC = () => {
         callbacks: {
           onopen: () => {
             setStatus(InterviewStatus.ACTIVE);
-            
+
             if (!inputAudioContextRef.current || !micStreamRef.current) return;
             const source = inputAudioContextRef.current.createMediaStreamSource(micStreamRef.current);
             const scriptProcessor = inputAudioContextRef.current.createScriptProcessor(4096, 1, 1);
@@ -110,7 +110,7 @@ const App: React.FC = () => {
             scriptProcessor.onaudioprocess = (event) => {
               const inputData = event.inputBuffer.getChannelData(0);
               const pcmBlob = createBlob(inputData);
-              
+
               // CRITICAL: Solely rely on sessionPromise resolves to send data
               sessionPromise.then((session) => {
                 session.sendRealtimeInput({ media: pcmBlob });
@@ -157,7 +157,7 @@ const App: React.FC = () => {
             if (base64Audio && outputAudioContextRef.current) {
               const audioCtx = outputAudioContextRef.current;
               nextStartTimeRef.current = Math.max(nextStartTimeRef.current, audioCtx.currentTime);
-              
+
               const audioBuffer = await decodeAudioData(
                 decode(base64Audio),
                 audioCtx,
@@ -171,7 +171,7 @@ const App: React.FC = () => {
               source.addEventListener('ended', () => {
                 sourcesRef.current.delete(source);
               });
-              
+
               source.start(nextStartTimeRef.current);
               nextStartTimeRef.current += audioBuffer.duration;
               sourcesRef.current.add(source);
@@ -180,7 +180,7 @@ const App: React.FC = () => {
             // Handle Interruption
             if (message.serverContent?.interrupted) {
               for (const source of sourcesRef.current) {
-                try { source.stop(); } catch (e) {}
+                try { source.stop(); } catch (e) { }
               }
               sourcesRef.current.clear();
               nextStartTimeRef.current = 0;
@@ -223,7 +223,7 @@ const App: React.FC = () => {
             </h1>
             <p className="text-slate-400 text-sm mt-1">AI Corporate Psychologist Assessment</p>
           </div>
-          
+
           <div className="flex items-center gap-3">
             {status === InterviewStatus.ACTIVE && (
               <div className="flex items-center gap-2 px-3 py-1 bg-green-900/30 text-green-400 rounded-full text-xs font-semibold animate-pulse border border-green-800/50">
@@ -243,10 +243,12 @@ const App: React.FC = () => {
         <div className="flex-1 p-6 space-y-6 overflow-y-auto max-h-[60vh] scrollbar-thin scrollbar-thumb-slate-600">
           {messages.length === 0 && status === InterviewStatus.IDLE && (
             <div className="flex flex-col items-center justify-center py-12 text-center">
-              <div className="w-20 h-20 bg-slate-700/50 rounded-full flex items-center justify-center mb-6 border border-slate-600">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
+              <div className="w-32 h-32 rounded-full overflow-hidden mb-6 border-4 border-slate-600 shadow-xl">
+                <img
+                  src="/psychologist.jpg"
+                  alt="Corporate Psychologist"
+                  className="w-full h-full object-cover"
+                />
               </div>
               <h2 className="text-xl font-semibold mb-2">Ready for the pressure?</h2>
               <p className="text-slate-400 max-w-sm">
@@ -255,14 +257,31 @@ const App: React.FC = () => {
             </div>
           )}
 
+          {messages.length === 0 && (status === InterviewStatus.CONNECTING || status === InterviewStatus.ACTIVE) && (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <div className="relative w-32 h-32 mb-6">
+                <div className="absolute inset-0 rounded-full bg-gradient-to-br from-green-400 via-green-500 to-emerald-600 animate-pulse-green shadow-2xl shadow-green-500/50"></div>
+                <div className="absolute inset-2 rounded-full bg-gradient-to-br from-green-300 via-green-400 to-emerald-500 animate-pulse-green-delayed"></div>
+                <div className="absolute inset-4 rounded-full bg-gradient-to-br from-green-200 via-green-300 to-emerald-400 animate-pulse-green-slow"></div>
+              </div>
+              <h2 className="text-xl font-semibold mb-2 text-green-400">
+                {status === InterviewStatus.CONNECTING ? 'Connecting...' : 'Session Active'}
+              </h2>
+              <p className="text-slate-400 max-w-sm">
+                {status === InterviewStatus.CONNECTING
+                  ? 'Establishing connection with the psychologist...'
+                  : 'The psychologist is listening...'}
+              </p>
+            </div>
+          )}
+
           <div className="space-y-4">
             {messages.map((msg, i) => (
               <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] p-4 rounded-2xl ${
-                  msg.role === 'user' 
-                  ? 'bg-blue-600 text-white rounded-tr-none' 
-                  : 'bg-slate-700 text-slate-100 rounded-tl-none border border-slate-600'
-                }`}>
+                <div className={`max-w-[85%] p-4 rounded-2xl ${msg.role === 'user'
+                    ? 'bg-blue-600 text-white rounded-tr-none'
+                    : 'bg-slate-700 text-slate-100 rounded-tl-none border border-slate-600'
+                  }`}>
                   <p className="text-sm font-medium mb-1 opacity-70">
                     {msg.role === 'user' ? 'You' : 'Psychologist'}
                   </p>
@@ -270,7 +289,7 @@ const App: React.FC = () => {
                 </div>
               </div>
             ))}
-            
+
             {(currentInputText || currentOutputText) && (
               <div className="space-y-2 opacity-50">
                 {currentInputText && (
@@ -325,7 +344,7 @@ const App: React.FC = () => {
                 END SESSION
               </button>
             )}
-            
+
             <p className="text-slate-500 text-xs text-center">
               Ensure your microphone is enabled. Use a quiet environment for the best psychological assessment.
             </p>
