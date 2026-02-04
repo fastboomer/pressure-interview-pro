@@ -24,4 +24,4 @@ Important notes:
 - Use the user's name frequently to keep the pressure interview feeling personal.
 `;
 
-export const VOICE_NAME = 'Fenrir'; // Deep, authoritative male voice
+export const VOICE_NAME = 'Charon'; // Deep, authoritative male voice
