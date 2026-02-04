@@ -428,7 +428,7 @@ const App: React.FC = () => {
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <div className="w-32 h-32 rounded-full overflow-hidden mb-6 border-4 border-slate-600 shadow-xl">
                 <img
-                  src="/psychologist.jpg"
+                  src="./psychologist.jpg"
                   alt="Corporate Psychologist"
                   className="w-full h-full object-cover"
                 />
