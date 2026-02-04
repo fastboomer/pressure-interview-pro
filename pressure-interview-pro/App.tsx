@@ -21,9 +21,53 @@ const App: React.FC = () => {
   const [currentInputText, setCurrentInputText] = useState('');
   const [currentOutputText, setCurrentOutputText] = useState('');
 
+  // Microphone selection and status
+  const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
+  const [micPermission, setMicPermission] = useState<'granted' | 'denied' | 'prompt'>('prompt');
+  const [audioLevel, setAudioLevel] = useState<number>(0);
+  const [signalDetected, setSignalDetected] = useState<boolean>(false);
+
   // Use refs to track transcriptions accurately within Live API session closures
   const inputTranscriptionRef = useRef('');
   const outputTranscriptionRef = useRef('');
+  const audioLevelIntervalRef = useRef<number | null>(null);
+
+  // Load available microphones on mount
+  useEffect(() => {
+    const loadDevices = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioInputs = devices.filter(device => device.kind === 'audioinput');
+        setAudioDevices(audioInputs);
+
+        // Set default device if available
+        if (audioInputs.length > 0 && !selectedDeviceId) {
+          setSelectedDeviceId(audioInputs[0].deviceId);
+        }
+
+        // Check microphone permission
+        if (navigator.permissions && navigator.permissions.query) {
+          const permissionStatus = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+          setMicPermission(permissionStatus.state as 'granted' | 'denied' | 'prompt');
+
+          permissionStatus.onchange = () => {
+            setMicPermission(permissionStatus.state as 'granted' | 'denied' | 'prompt');
+          };
+        }
+      } catch (err) {
+        console.error('Error loading devices:', err);
+      }
+    };
+
+    loadDevices();
+
+    // Refresh device list when devices change
+    navigator.mediaDevices.addEventListener('devicechange', loadDevices);
+    return () => {
+      navigator.mediaDevices.removeEventListener('devicechange', loadDevices);
+    };
+  }, [selectedDeviceId]);
 
   const stopSession = useCallback(() => {
     setStatus(InterviewStatus.DISCONNECTED);
@@ -56,9 +100,105 @@ const App: React.FC = () => {
       outputAudioContextRef.current = null;
     }
 
+    // Stop audio level monitoring
+    if (audioLevelIntervalRef.current) {
+      clearInterval(audioLevelIntervalRef.current);
+      audioLevelIntervalRef.current = null;
+    }
+    setAudioLevel(0);
+
     // Session will be closed by the server or by losing references
     sessionPromiseRef.current = null;
   }, []);
+
+  // Start the system test (move from SYSTEM_CHECK to TESTING)
+  const startTest = () => {
+    setStatus(InterviewStatus.TESTING);
+    startMicTest();
+  };
+
+  // Handle microphone device change during testing
+  const handleMicChange = (newDeviceId: string) => {
+    setSelectedDeviceId(newDeviceId);
+    if (status === InterviewStatus.TESTING) {
+      // Restart mic test with new device
+      stopMicTest();
+      setTimeout(() => {
+        startMicTest();
+      }, 100);
+    }
+  };
+
+  // Start microphone testing (audio level monitoring only)
+  const startMicTest = async () => {
+    try {
+      setError(null);
+      setSignalDetected(false);
+
+      // Get Microphone with selected device
+      const constraints: MediaStreamConstraints = {
+        audio: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : true
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      micStreamRef.current = stream;
+      setMicPermission('granted');
+
+      // Set up audio level monitoring
+      inputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      const audioContext = inputAudioContextRef.current;
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+
+      // Monitor audio levels
+      audioLevelIntervalRef.current = window.setInterval(() => {
+        analyser.getByteFrequencyData(dataArray);
+        const average = dataArray.reduce((a, b) => a + b) / bufferLength;
+        const level = average / 255;
+        setAudioLevel(level);
+
+        // Detect if signal is strong enough
+        if (level > 0.1) {
+          setSignalDetected(true);
+        }
+      }, 100);
+
+    } catch (err: any) {
+      console.error('Microphone test error:', err);
+      setError(err.message || 'Failed to access microphone.');
+      setMicPermission('denied');
+    }
+  };
+
+  // Stop microphone test and clean up
+  const stopMicTest = () => {
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach(track => track.stop());
+      micStreamRef.current = null;
+    }
+
+    if (audioLevelIntervalRef.current) {
+      clearInterval(audioLevelIntervalRef.current);
+      audioLevelIntervalRef.current = null;
+    }
+
+    if (inputAudioContextRef.current) {
+      inputAudioContextRef.current.close();
+      inputAudioContextRef.current = null;
+    }
+
+    setAudioLevel(0);
+  };
+
+  // Continue to interview (move from TESTING to starting the actual session)
+  const continueToInterview = () => {
+    stopMicTest();
+    startSession();
+  };
 
   const startSession = async () => {
     try {
@@ -83,9 +223,30 @@ const App: React.FC = () => {
       outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       nextStartTimeRef.current = 0;
 
-      // Get Microphone
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Get Microphone with selected device
+      const constraints: MediaStreamConstraints = {
+        audio: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : true
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       micStreamRef.current = stream;
+      setMicPermission('granted');
+
+      // Set up audio level monitoring
+      const audioContext = inputAudioContextRef.current;
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+
+      // Monitor audio levels
+      audioLevelIntervalRef.current = window.setInterval(() => {
+        analyser.getByteFrequencyData(dataArray);
+        const average = dataArray.reduce((a, b) => a + b) / bufferLength;
+        setAudioLevel(average / 255); // Normalize to 0-1
+      }, 100);
 
       const sessionPromise = ai.live.connect({
         model: GEMINI_MODEL,
@@ -95,6 +256,13 @@ const App: React.FC = () => {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICE_NAME } },
           },
           systemInstruction: SYSTEM_INSTRUCTION,
+
+          // Latency Optimizations
+          generationConfig: {
+            candidateCount: 1, // Only generate one response for faster processing
+            temperature: 0.9, // Slightly lower for more focused responses
+          },
+
           inputAudioTranscription: {},
           outputAudioTranscription: {},
         },
@@ -104,7 +272,8 @@ const App: React.FC = () => {
 
             if (!inputAudioContextRef.current || !micStreamRef.current) return;
             const source = inputAudioContextRef.current.createMediaStreamSource(micStreamRef.current);
-            const scriptProcessor = inputAudioContextRef.current.createScriptProcessor(4096, 1, 1);
+            // Reduced buffer size for lower latency (2048 instead of 4096)
+            const scriptProcessor = inputAudioContextRef.current.createScriptProcessor(2048, 1, 1);
             scriptProcessorRef.current = scriptProcessor;
 
             scriptProcessor.onaudioprocess = (event) => {
@@ -241,7 +410,8 @@ const App: React.FC = () => {
 
         {/* Content Area */}
         <div className="flex-1 p-6 space-y-6 overflow-y-auto max-h-[60vh] scrollbar-thin scrollbar-thumb-slate-600">
-          {messages.length === 0 && status === InterviewStatus.IDLE && (
+          {/* LANDING PAGE: Psychologist Image */}
+          {status === InterviewStatus.IDLE && (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <div className="w-32 h-32 rounded-full overflow-hidden mb-6 border-4 border-slate-600 shadow-xl">
                 <img
@@ -251,12 +421,113 @@ const App: React.FC = () => {
                 />
               </div>
               <h2 className="text-xl font-semibold mb-2">Ready for the pressure?</h2>
-              <p className="text-slate-400 max-w-sm">
+              <p className="text-slate-400 max-w-sm mb-6">
                 Our AI Corporate Psychologist will conduct a brief assessment of your life events and evaluate them for executive leadership qualities.
               </p>
+              <button
+                onClick={() => setStatus(InterviewStatus.SYSTEM_CHECK)}
+                className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-all transform hover:scale-105 active:scale-95"
+              >
+                Start Test
+              </button>
             </div>
           )}
 
+          {/* STAGE 1: System Check Screen */}
+          {status === InterviewStatus.SYSTEM_CHECK && (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="bg-slate-900/80 rounded-2xl p-12 max-w-md border border-slate-700">
+                <div className="flex items-center justify-center gap-3 mb-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <h2 className="text-2xl font-bold text-slate-200">System Check</h2>
+                </div>
+                <p className="text-slate-400 mb-8">
+                  Verify your microphone signal before connecting.
+                </p>
+                <button
+                  onClick={startTest}
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-all transform hover:scale-105 active:scale-95"
+                >
+                  Start Test
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* STAGE 2: Microphone Testing Screen */}
+          {status === InterviewStatus.TESTING && (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <div className="bg-slate-900/80 rounded-2xl p-8 max-w-md w-full border border-slate-700 space-y-6">
+                <div className="flex items-center justify-center gap-3 mb-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <h2 className="text-xl font-bold text-slate-200">System Check</h2>
+                </div>
+                <p className="text-slate-400 text-sm">
+                  Verify your microphone signal before connecting.
+                </p>
+
+                {/* Microphone Selector */}
+                <div className="space-y-2">
+                  <select
+                    value={selectedDeviceId}
+                    onChange={(e) => handleMicChange(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-600 text-slate-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {audioDevices.length === 0 ? (
+                      <option>No microphones found</option>
+                    ) : (
+                      audioDevices.map((device) => (
+                        <option key={device.deviceId} value={device.deviceId}>
+                          {device.label || `Microphone ${device.deviceId.slice(0, 8)}...`}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                  <p className="text-xs text-slate-500">
+                    Active: {audioDevices.find(d => d.deviceId === selectedDeviceId)?.label || 'Default Microphone'}
+                  </p>
+                </div>
+
+                {/* Audio Level Bar */}
+                <div className="space-y-2">
+                  <div className="w-full h-8 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+                    <div
+                      className="h-full bg-gradient-to-r neon-green-bar transition-all duration-100"
+                      style={{ width: `${audioLevel * 100}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Signal Detected Indicator */}
+                {signalDetected && (
+                  <div className="flex items-center justify-center gap-2 text-sm font-semibold" style={{ color: '#00FF00' }}>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                    </svg>
+                    Signal Detected!
+                  </div>
+                )}
+
+                {/* Continue Button */}
+                <button
+                  onClick={continueToInterview}
+                  disabled={!signalDetected}
+                  className={`w-full font-bold py-4 px-8 rounded-xl shadow-lg transition-all transform ${signalDetected
+                    ? 'neon-green-button text-black hover:scale-105 active:scale-95'
+                    : 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                    }`}
+                >
+                  CONTINUE TO INTERVIEW
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Interview Active/Connecting States */}
           {messages.length === 0 && (status === InterviewStatus.CONNECTING || status === InterviewStatus.ACTIVE) && (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <div className="relative w-32 h-32 mb-6">
@@ -279,8 +550,8 @@ const App: React.FC = () => {
             {messages.map((msg, i) => (
               <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div className={`max-w-[85%] p-4 rounded-2xl ${msg.role === 'user'
-                    ? 'bg-blue-600 text-white rounded-tr-none'
-                    : 'bg-slate-700 text-slate-100 rounded-tl-none border border-slate-600'
+                  ? 'bg-blue-600 text-white rounded-tr-none'
+                  : 'bg-slate-700 text-slate-100 rounded-tl-none border border-slate-600'
                   }`}>
                   <p className="text-sm font-medium mb-1 opacity-70">
                     {msg.role === 'user' ? 'You' : 'Psychologist'}
@@ -322,18 +593,9 @@ const App: React.FC = () => {
             </div>
           )}
 
-          <div className="flex flex-col items-center gap-4">
-            {status === InterviewStatus.IDLE || status === InterviewStatus.DISCONNECTED || status === InterviewStatus.ERROR ? (
-              <button
-                onClick={startSession}
-                className="w-full max-w-xs bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-8 rounded-2xl shadow-lg transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-2"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                </svg>
-                START INTERVIEW
-              </button>
-            ) : (
+          {/* Only show END SESSION button when interview is active */}
+          {(status === InterviewStatus.ACTIVE || status === InterviewStatus.CONNECTING) && (
+            <div className="flex flex-col items-center gap-4">
               <button
                 onClick={stopSession}
                 className="w-full max-w-xs bg-red-600 hover:bg-red-500 text-white font-bold py-4 px-8 rounded-2xl shadow-lg transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-2"
@@ -343,12 +605,12 @@ const App: React.FC = () => {
                 </svg>
                 END SESSION
               </button>
-            )}
 
-            <p className="text-slate-500 text-xs text-center">
-              Ensure your microphone is enabled. Use a quiet environment for the best psychological assessment.
-            </p>
-          </div>
+              <p className="text-slate-500 text-xs text-center">
+                Speak clearly. The psychologist is listening and evaluating your responses.
+              </p>
+            </div>
+          )}
         </div>
       </div>
 

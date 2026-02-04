@@ -7,6 +7,8 @@ export interface Message {
 
 export enum InterviewStatus {
   IDLE = 'IDLE',
+  SYSTEM_CHECK = 'SYSTEM_CHECK',
+  TESTING = 'TESTING',
   CONNECTING = 'CONNECTING',
   ACTIVE = 'ACTIVE',
   DISCONNECTED = 'DISCONNECTED',
