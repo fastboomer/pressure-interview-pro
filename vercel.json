@@ -1,0 +1,5 @@
+{
+    "buildCommand": "cd pressure-interview-pro && npm run build",
+    "outputDirectory": "pressure-interview-pro/dist",
+    "framework": "vite"
+}
