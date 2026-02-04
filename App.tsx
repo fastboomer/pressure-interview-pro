@@ -20,6 +20,7 @@ const App: React.FC = () => {
 
   const [currentInputText, setCurrentInputText] = useState('');
   const [currentOutputText, setCurrentOutputText] = useState('');
+  const [waitingMessage, setWaitingMessage] = useState<string | null>(null);
 
   // Microphone selection and status
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
@@ -244,7 +245,7 @@ const App: React.FC = () => {
         setMicPermission('granted');
       }
 
-      // Set up audio level monitoring for the interview
+      // Set up audio level monitoring
       const audioContext = inputAudioContextRef.current;
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 256;
@@ -306,14 +307,32 @@ const App: React.FC = () => {
           onmessage: async (message: LiveServerMessage) => {
             // Handle Transcriptions
             if (message.serverContent?.outputTranscription) {
+              // Victor is talking - clear any waiting messages
+              setWaitingMessage(null);
               outputTranscriptionRef.current += message.serverContent.outputTranscription.text;
               setCurrentOutputText(outputTranscriptionRef.current);
             } else if (message.serverContent?.inputTranscription) {
-              inputTranscriptionRef.current += message.serverContent.inputTranscription.text;
+              const text = message.serverContent.inputTranscription.text;
+              inputTranscriptionRef.current += text;
               setCurrentInputText(inputTranscriptionRef.current);
+
+              // Determine which waiting message to show based on conversation progress
+              if (inputTranscriptionRef.current.trim().length > 2) {
+                setMessages(prev => {
+                  const count = prev.length;
+                  if (count <= 1) {
+                    setWaitingMessage("One Moment Preparing Candidate Profile");
+                  } else {
+                    setWaitingMessage("Scoring Response");
+                  }
+                  return prev;
+                });
+              }
             }
 
             if (message.serverContent?.turnComplete) {
+              // Reset waiting message on turn completion
+              setWaitingMessage(null);
               const userText = inputTranscriptionRef.current;
               const assistantText = outputTranscriptionRef.current;
 
@@ -338,6 +357,8 @@ const App: React.FC = () => {
             // Handle Audio Data
             const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
             if (base64Audio && outputAudioContextRef.current) {
+              // Victor is sending audio - clear any waiting messages
+              setWaitingMessage(null);
               const audioCtx = outputAudioContextRef.current;
               nextStartTimeRef.current = Math.max(nextStartTimeRef.current, audioCtx.currentTime);
 
@@ -362,6 +383,7 @@ const App: React.FC = () => {
 
             // Handle Interruption
             if (message.serverContent?.interrupted) {
+              setWaitingMessage(null);
               for (const source of sourcesRef.current) {
                 try { source.stop(); } catch (e) { }
               }
@@ -392,6 +414,16 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 md:p-8 bg-slate-900 text-slate-100">
+      <style>{`
+        @keyframes blink {
+          0% { opacity: 1; }
+          50% { opacity: 0.2; }
+          100% { opacity: 1; }
+        }
+        .animate-blink {
+          animation: blink 1.5s infinite;
+        }
+      `}</style>
       <div className="max-w-3xl w-full bg-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col border border-slate-700">
         {/* Header */}
         <div className="p-6 border-b border-slate-700 flex items-center justify-between bg-slate-800/50">
@@ -627,6 +659,15 @@ const App: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Blinking Status Message */}
+      {waitingMessage && (
+        <div className="fixed bottom-6 left-6 md:left-8 z-50 pointer-events-none w-full md:w-auto flex justify-center md:justify-start px-4">
+          <div className="text-white font-bold text-lg md:text-xl tracking-wide animate-blink drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] uppercase">
+            {waitingMessage}
+          </div>
+        </div>
+      )}
 
       {/* Decorative background elements */}
       <div className="fixed top-0 left-0 w-full h-full -z-10 overflow-hidden pointer-events-none">
