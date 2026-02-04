@@ -196,7 +196,14 @@ const App: React.FC = () => {
 
   // Continue to interview (move from TESTING to starting the actual session)
   const continueToInterview = () => {
-    stopMicTest();
+    // Stop audio level monitoring but KEEP the microphone stream
+    if (audioLevelIntervalRef.current) {
+      clearInterval(audioLevelIntervalRef.current);
+      audioLevelIntervalRef.current = null;
+    }
+    setAudioLevel(0);
+
+    // Start the session (will reuse existing mic stream)
     startSession();
   };
 
@@ -219,19 +226,25 @@ const App: React.FC = () => {
       const ai = new GoogleGenAI({ apiKey });
 
       // Initialize Audio Contexts
-      inputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      if (!inputAudioContextRef.current) {
+        inputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      }
       outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       nextStartTimeRef.current = 0;
 
-      // Get Microphone with selected device
-      const constraints: MediaStreamConstraints = {
-        audio: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : true
-      };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      micStreamRef.current = stream;
-      setMicPermission('granted');
+      // Reuse existing microphone stream if available (from test phase)
+      // Otherwise request new stream
+      let stream = micStreamRef.current;
+      if (!stream) {
+        const constraints: MediaStreamConstraints = {
+          audio: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : true
+        };
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        micStreamRef.current = stream;
+        setMicPermission('granted');
+      }
 
-      // Set up audio level monitoring
+      // Set up audio level monitoring for the interview
       const audioContext = inputAudioContextRef.current;
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 256;
