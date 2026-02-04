@@ -1,7 +1,0 @@
-{
-  "name": "Pressure Interview Pro",
-  "description": "A conversational AI tool that conducts professional corporate psychologist pressure interviews using the Gemini 2.5 Live API.",
-  "requestFramePermissions": [
-    "microphone"
-  ]
-}
