@@ -210,9 +210,9 @@ const App: React.FC = () => {
       inputTranscriptionRef.current = '';
       outputTranscriptionRef.current = '';
 
-      const apiKey = process.env.API_KEY;
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       if (!apiKey) {
-        throw new Error("API Key is not configured.");
+        throw new Error("API Key is not configured. Please set VITE_GEMINI_API_KEY in your environment variables.");
       }
 
       // Initialize a new GoogleGenAI instance for the session
