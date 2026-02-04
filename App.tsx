@@ -281,6 +281,7 @@ const App: React.FC = () => {
         },
         callbacks: {
           onopen: () => {
+            console.log('Live API Session Opened - Victor should start speaking now.');
             setStatus(InterviewStatus.ACTIVE);
 
             if (!inputAudioContextRef.current || !micStreamRef.current) return;
