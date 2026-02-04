@@ -1,7 +1,7 @@
 # Pressure Interview Pro - Project Status Report & Restoration Brief
 **Date:** February 3, 2026  
 **Status:** ✅ Restored & Optimized  
-**Live URL:** [https://pressure-interview-pro.vercel.app](https://pressure-interview-pro.vercel.app)
+**Live URL:** [https://project-gateway-landing-sigma.vercel.app](https://project-gateway-landing-sigma.vercel.app)
 
 ---
 
